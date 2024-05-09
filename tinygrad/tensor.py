@@ -14,7 +14,7 @@ from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps, ScheduleItem
 from tinygrad.buffer import Buffer, BufferOptions
 from tinygrad.device import Device
-from tinygrad.shape.symbolic import sint, Variable, MulNode, Node
+from tinygrad.shape.symbolic import DivNode, SumNode, sint, Variable, MulNode, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import create_schedule_with_vars
 
@@ -271,6 +271,8 @@ class Tensor:
   @staticmethod
   def from_node(y:Node, **kwargs) -> Tensor:
     if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
+    if isinstance(y, DivNode): return Tensor.from_node(y.a, **kwargs) / y.b
+    if isinstance(y, SumNode): return Tensor.from_node(y.a, **kwargs) + y.b
     if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
     raise RuntimeError(f"unhandled Node {y}")
 
@@ -353,7 +355,7 @@ class Tensor:
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:Tuple[sint, ...], fill_value:ConstType, **kwargs):
+  def full(shape:Tuple[sint, ...], fill_value:Union[ConstType, Node], **kwargs):
     """
     Creates a tensor with the given shape, filled with the given value.
 
@@ -365,7 +367,11 @@ class Tensor:
     print(t.numpy())
     ```
     """
-    return Tensor(fill_value, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
+    if isinstance(fill_value, Node):
+      filled = Tensor.from_node(fill_value, **kwargs)
+    else:
+      filled = Tensor(fill_value, **kwargs)
+    return filled.reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
   def zeros(*shape, **kwargs):
@@ -423,9 +429,14 @@ class Tensor:
     ```
     """
     if stop is None: stop, start = start, 0
-    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    if not any(isinstance(x, Node) for x in (start, stop, step)):
+      return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    else:
+      diff = stop+(start*-1)
+      remainder = (diff)%step
+      size = ((step+(remainder*-1))+(diff))//step
+      return (Tensor.full((size,), step, dtype=dtype, **kwargs)._cumsum() + Tensor.full((size,), (start - step), dtype=dtype, **kwargs)).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):

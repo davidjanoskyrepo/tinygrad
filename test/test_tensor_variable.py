@@ -32,7 +32,6 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.mean().item()
     assert ret == 1
 
-  @unittest.skip("symbolic var isn't supported")
   def test_symbolic_var(self):
     vv = Variable("a", 1, 10)
     vv.bind(2)
@@ -58,7 +57,6 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.mean(axis=1).reshape(2, 1).numpy()
     assert np.all(ret == 1)
 
-  @unittest.skip("symbolic arange isn't supported")
   def test_symbolic_arange(self):
     vv = Variable("a", 1, 10)
     vv.bind(2)
