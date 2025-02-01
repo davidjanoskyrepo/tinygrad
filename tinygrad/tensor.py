@@ -8,7 +8,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, TensorMathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -116,7 +116,7 @@ def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: r
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-class Tensor(SimpleMathTrait):
+class Tensor(TensorMathTrait):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -3378,38 +3378,6 @@ class Tensor(SimpleMathTrait):
     return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
 
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
-
-  # ***** op wrappers *****
-
-  def __invert__(self) -> Tensor: return self.bitwise_not()
-
-  def __lshift__(self, x) -> Tensor: return self.lshift(x)
-  def __rshift__(self, x) -> Tensor: return self.rshift(x)
-
-  def __pow__(self, x) -> Tensor: return self.pow(x)
-  def __matmul__(self, x) -> Tensor: return self.matmul(x)
-
-  def __rpow__(self, x) -> Tensor: return self.pow(x, True)
-  def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
-
-  def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
-  def __isub__(self, x) -> Tensor: return self.assign(self.sub(x))
-  def __imul__(self, x) -> Tensor: return self.assign(self.mul(x))
-  def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
-  def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
-  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.idiv(x))
-  def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
-  def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
-  def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
-  def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
-  def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
-  def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
-
-  def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
-  def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
-  def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
-
-  def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
   # ***** functional nn ops *****
 

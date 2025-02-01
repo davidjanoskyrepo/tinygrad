@@ -17,13 +17,13 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
-class SimpleMathTrait:
+class MathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
   def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
-
+  
   # great functions you get!
-  def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
+  def ufix(self, x): return self.const_like(x) if not isinstance(x, UOpMathTrait) else x
   def _binop(self, op, x, reverse): return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
   def logical_not(self): return self.ne(True)
   def neg(self):
@@ -38,6 +38,20 @@ class SimpleMathTrait:
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
+  
+  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
+  def eq(self, x): return self.ne(x).logical_not()
+  
+  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
+  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
+
+  def __ne__(self, x): return self.ne(x)
+  # NOTE: __eq__ isn't overridden, and means the same thing as is by default
+  
+  def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
+  def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
+  def __ge__(self, x): return (self < x).logical_not()
+  def __le__(self, x): return (self > x).logical_not()
 
   def __neg__(self): return self.neg()
 
@@ -61,25 +75,12 @@ class SimpleMathTrait:
   def __rxor__(self, x): return self.xor(x, True)
   def __rmod__(self, x): return self.mod(x, True)
 
-  def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
-  def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
-  def __ge__(self, x): return (self < x).logical_not()
-  def __le__(self, x): return (self > x).logical_not()
-
-  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
-  def eq(self, x): return self.ne(x).logical_not()
-  def __ne__(self, x): return self.ne(x)
-  # NOTE: __eq__ isn't overridden, and means the same thing as is by default
-
-class MathTrait(SimpleMathTrait):
-  # TODO: move to Tensor when new backward is done
-  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
-  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
   def __lshift__(self, x): return self.lshift(x)
   def __rshift__(self, x): return self.rshift(x)
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
 
+class UOpMathTrait(MathTrait):
   def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
   def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
@@ -89,6 +90,41 @@ class MathTrait(SimpleMathTrait):
   def sin(self): return self.alu(Ops.SIN)
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
+  
+class TensorMathTrait(MathTrait):
+  def _apply_broadcasted_uop(self:T, uop:UOp, x:T, reverse:bool) -> T: raise NotImplementedError
+  def assign(self:T, x:T) -> T: raise NotImplementedError
+  def pow(self:T, x:T) -> T: raise NotImplementedError
+  def matmul(self:T, x:T) -> T: raise NotImplementedError
+  def bitwise_not(self:T) -> T: raise NotImplementedError
+  
+  def ne(self, x): return self._apply_broadcasted_uop(UOp.ne, x, False) # type: ignore[override]
+  
+  def __eq__(self, x): return self.eq(x) # type: ignore[override]
+
+  def __lt__(self, x): return self._apply_broadcasted_uop(UOp.__lt__, x, False) # type: ignore[override]
+  def __gt__(self, x): return self._apply_broadcasted_uop(UOp.__lt__, x, True) # type: ignore[override]
+  
+  def __invert__(self): return self.bitwise_not()
+
+  def __pow__(self, x): return self.pow(x)
+  def __matmul__(self, x): return self.matmul(x)
+
+  def __rpow__(self, x): return self.pow(x, True)
+  def __rmatmul__(self, x): return self.matmul(x, True)
+  
+  def __iadd__(self, x): return self.assign(self.add(x))
+  def __isub__(self, x): return self.assign(self.sub(x))
+  def __imul__(self, x): return self.assign(self.mul(x))
+  def __ipow__(self, x): return self.assign(self.pow(x))
+  def __itruediv__(self, x): return self.assign(self.div(x))
+  def __ifloordiv__(self, x): return self.assign(self.idiv(x))
+  def __imatmul__(self, x): return self.assign(self.matmul(x))
+  def __iand__(self, x): return self.assign(self.bitwise_and(x))
+  def __ior__(self, x): return self.assign(self.bitwise_or(x))
+  def __ixor__(self, x): return self.assign(self.xor(x))
+  def __ilshift__(self, x): return self.assign(self.lshift(x))
+  def __irshift__(self, x): return self.assign(self.rshift(x))
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
@@ -237,7 +273,7 @@ all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionar
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
-class UOp(MathTrait, metaclass=UOpMetaClass):
+class UOp(UOpMathTrait, metaclass=UOpMetaClass):
   op:Ops
   dtype:DType = dtypes.void
   src:tuple[UOp, ...] = tuple()
@@ -698,7 +734,7 @@ def get_location() -> tuple[str, int]:
 def lines(fn) -> list[str]:
   with open(fn) as f: return f.readlines()
 
-class UPat(MathTrait):
+class UPat(UOpMathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
   def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
                src:Optional[Union[tuple[UPat, ...], list[UPat], UPat]]=None, arg:Any=None,
